@@ -3,30 +3,225 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
+import { cn } from "@/lib/utils";
 import { FelicityProvider, TutorialStep, useFelicity } from "felicity-react";
-import { ArrowUp, MessageCircleIcon } from "lucide-react";
+import { ArrowUp, BotIcon, MessageCircleIcon } from "lucide-react";
 import React, { useCallback, useState } from "react";
+
+/**
+ * The various states that your results section can be in.
+ */
+type ResultState =
+  | {
+      // Landing screen.
+      type: "initial";
+    }
+  | {
+      // Issued query, but no steps returned.
+      type: "empty-results";
+    }
+  | {
+      // There weas an error.ƒ
+      type: "error";
+      reason: string;
+    }
+  | {
+      type: "show-results";
+      steps: TutorialStep[];
+    };
+
+const LoadingSpinner: React.FC = () => {
+  return (
+    <svg
+      className="animate-spin h-5 w-5 text-white"
+      xmlns="http://www.w3.org/2000/svg"
+      fill="none"
+      viewBox="0 0 24 24"
+    >
+      <circle
+        className="opacity-25"
+        cx="12"
+        cy="12"
+        r="10"
+        stroke="currentColor"
+        stroke-width="4"
+      />
+      <path
+        className="opacity-75"
+        fill="currentColor"
+        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+      />
+    </svg>
+  );
+};
+
+const NullState: React.FC<{ title: string; subtitle: string }> = ({
+  title,
+  subtitle,
+}) => {
+  return (
+    <div className="flex flex-col h-full justify-center text-sm text-center">
+      <div>{title}</div>
+      <div>{subtitle}</div>
+    </div>
+  );
+};
+
+const SuggestedQuestionGridCard: React.FC<{
+  question: string;
+  onClick: () => void;
+}> = ({ question, onClick }) => {
+  return (
+    <div
+      className="border rounded p-3 shadow-sm flex flex-col gap-2 text-sm cursor-pointer hover:bg-neutral-100"
+      onClick={onClick}
+    >
+      <MessageCircleIcon size={16} className="text-neutral-400" />
+      <div>{question}</div>
+    </div>
+  );
+};
+
+const SuggestedQuestionGrid: React.FC<{
+  onSearch: (query: string) => void;
+}> = ({ onSearch }) => {
+  const exampleQuestions = [
+    "How do I create a new timecard?",
+    "How do I view an Activity",
+    "What is the best way for me to edit a timecard?",
+  ];
+  return (
+    <div className="w-full gap-3 grid grid-cols-3">
+      {exampleQuestions.map((exampleQuestion) => (
+        <SuggestedQuestionGridCard
+          key={exampleQuestion}
+          question={exampleQuestion}
+          onClick={() => onSearch(exampleQuestion)}
+        />
+      ))}
+    </div>
+  );
+};
+
+const TutorialStepCard: React.FC<{
+  step: TutorialStep;
+  index: number;
+}> = ({ step, index }) => {
+  return (
+    <div
+      key={step.id}
+      className="flex flex-col w-full flex-wrap text-sm text-wrap"
+    >
+      <div className="font-semibold mb-1">Step {index}</div>
+      <div className="mb-3 ">{step.action}</div>
+      <div className="w-full h-[500px] border rounded bg-neutral-50">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={step.screenshot}
+          alt={step.action}
+          className="w-full h-full object-contain"
+        />
+      </div>
+    </div>
+  );
+};
+
+const FelicityResultBody: React.FC<{
+  state: ResultState;
+  onQuery: (input: string) => void;
+}> = ({ state, onQuery }) => {
+  switch (state.type) {
+    case "initial":
+      return (
+        <div className="flex flex-col gap-6 h-full justify-center w-full max-w-[750px] items-center">
+          <div>
+            {/* Your Icon or Assistant message here. */}
+            <BotIcon size={48} />
+          </div>
+
+          {/* Some prompt */}
+          <SuggestedQuestionGrid onSearch={onQuery} />
+        </div>
+      );
+
+    case "show-results":
+      const { steps } = state;
+      return (
+        <div className="w-full max-w-[750px] flex flex-col gap-6">
+          {steps.map((step, index) => (
+            <>
+              <TutorialStepCard index={index + 1} step={step} />
+              <Separator />
+            </>
+          ))}
+        </div>
+      );
+
+    case "empty-results":
+      return (
+        <NullState
+          title="Unfortunately, we could not create a tutorial for that request."
+          subtitle="Please contact your representative."
+        />
+      );
+
+    case "error":
+      return (
+        <NullState
+          title="Somethin went wrong."
+          subtitle="Please contact your representative."
+        />
+      );
+  }
+};
 
 const FelicityChat: React.FC = () => {
   const felicity = useFelicity();
   const [input, setInput] = useState("");
-  const [steps, setSteps] = useState<TutorialStep[]>();
   const [isLoading, setLoading] = useState(false);
+  const [resultState, setResultState] = useState<ResultState>({
+    type: "initial",
+  });
 
-  const onSearch = useCallback(async () => {
-    setLoading(true);
+  const onSearch = useCallback(
+    async (query?: string) => {
+      if (query) {
+        setInput(query);
+      }
 
-    const response = await felicity.search(input);
+      setLoading(true);
 
-    setLoading(false);
+      try {
+        const response = await felicity.search(query ? query : input);
+        if (response.success) {
+          setResultState(
+            response.steps.length > 0
+              ? {
+                  type: "show-results",
+                  steps: response.steps,
+                }
+              : { type: "empty-results" }
+          );
+        } else {
+          setResultState({
+            type: "error",
+            reason: response.reason,
+          });
+        }
+      } catch (e) {
+        setResultState({
+          type: "error",
+          reason: "Something appeared to go wrong.",
+        });
+      }
 
-    if (response.success) {
-      setSteps(response.steps);
-    }
-  }, [felicity, input]);
+      setLoading(false);
+    },
+    [felicity, input]
+  );
 
   return (
-    <div className="container max-w-none min-h-screen flex h-screen w-full flex-col items-center gap-6 pt-12 pr-6 pl-6">
+    <div className="container max-w-none min-h-screen flex h-screen w-full flex-col items-center gap-6 pt-12 px-6">
       {/* Header */}
       <div className="flex-none flex w-full max-w-[750px] items-center gap-4 ">
         <div className="flex grow shrink-0 basis-0 items-center gap-2">
@@ -35,57 +230,44 @@ const FelicityChat: React.FC = () => {
         </div>
       </div>
 
-      {/* Body */}
-      <div className="flex-1 flex justify-center overflow-y-auto min-h-0  w-full">
-        <div className="w-full max-w-[750px] flex flex-col gap-6">
-          {steps &&
-            steps.map((step, index) => (
-              <>
-                <div key={step.id} className="flex flex-col text-sm">
-                  <div className="font-semibold mb-1">Step {index + 1}</div>
-                  <div className="mb-3">{step.action}</div>
-                  <div className="w-full h-[500px] border rounded bg-neutral-50">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={step.screenshot}
-                      alt={step.action}
-                      className="w-full h-full object-contain"
-                    />
-                  </div>
-                </div>
-                <Separator />
-              </>
-            ))}
-        </div>
+      {/* Results Section */}
+      <div className="flex-1 flex justify-center overflow-y-auto min-h-0 w-full">
+        <FelicityResultBody
+          state={resultState}
+          onQuery={(input) => {
+            onSearch(input);
+          }}
+        />
       </div>
 
-      {/* Footer */}
-      <div className="flex-none flex w-full max-w-[750px] flex-col items-start gap-8">
-        <div className="flex w-full flex-col items-start gap-2 pb-4">
-          <div
-            className="flex w-full items-center gap-2 overflow-hidden rounded-full bg-input pt-3 pr-4 pb-3 pl-4"
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                onSearch();
-              }
-            }}
-          >
-            <Input
-              className="bg-input border-none ring-0 ring-offset-0 focus-visible:ring-0 focus-visible:ring-offset-0"
-              placeholder="Search ACME company for questions."
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              disabled={isLoading}
-            />
+      {/* Search */}
+      <div className="flex-none w-full max-w-[750px] pb-4">
+        <div
+          className="flex w-full items-center gap-2 overflow-hidden rounded-full bg-input p-4"
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              onSearch();
+            }
+          }}
+        >
+          <Input
+            className={cn(
+              "bg-input border-none ring-0 ring-offset-0 focus-visible:ring-0 focus-visible:ring-offset-0 flex-1"
+            )}
+            placeholder="Search ACME company for questions."
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            disabled={isLoading}
+          />
 
-            <Button
-              size="icon"
-              className="rounded-full flex-none"
-              disabled={isLoading}
-            >
-              <ArrowUp className="h-4 w-4" />
-            </Button>
-          </div>
+          <Button
+            size="icon"
+            className="rounded-full flex-none"
+            disabled={isLoading}
+            onClick={() => onSearch()}
+          >
+            {isLoading ? <LoadingSpinner /> : <ArrowUp className="h-4 w-4" />}
+          </Button>
         </div>
       </div>
     </div>
