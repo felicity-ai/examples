@@ -3,9 +3,16 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
+import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { FelicityProvider, TutorialStep, useFelicity } from "felicity-react";
-import { ArrowUp, BotIcon, MessageCircleIcon } from "lucide-react";
+import {
+  ArrowUp,
+  BotIcon,
+  MessageCircleIcon,
+  ThumbsDownIcon,
+  ThumbsUpIcon,
+} from "lucide-react";
 import React, { useCallback, useState } from "react";
 
 /**
@@ -21,13 +28,14 @@ type ResultState =
       type: "empty-results";
     }
   | {
-      // There weas an error.ƒ
+      // There weas an error.
       type: "error";
       reason: string;
     }
   | {
       type: "show-results";
       steps: TutorialStep[];
+      answerFeedbackId?: string;
     };
 
 const LoadingSpinner: React.FC = () => {
@@ -44,7 +52,7 @@ const LoadingSpinner: React.FC = () => {
         cy="12"
         r="10"
         stroke="currentColor"
-        stroke-width="4"
+        strokeWidth="4"
       />
       <path
         className="opacity-75"
@@ -108,10 +116,7 @@ const TutorialStepCard: React.FC<{
   index: number;
 }> = ({ step, index }) => {
   return (
-    <div
-      key={step.id}
-      className="flex flex-col w-full flex-wrap text-sm text-wrap"
-    >
+    <div className="flex flex-col w-full flex-wrap text-sm text-wrap">
       <div className="font-semibold mb-1">Step {index}</div>
       <div className="mb-3 ">{step.action}</div>
       <div className="w-full h-[500px] border rounded bg-neutral-50">
@@ -124,6 +129,83 @@ const TutorialStepCard: React.FC<{
       </div>
     </div>
   );
+};
+
+const FeedbackRow: React.FC<{
+  answerFeedbackId: string;
+}> = ({ answerFeedbackId }) => {
+  const felicity = useFelicity();
+  const [step, setStep] = useState<"correct" | "feedback" | "done">("correct");
+  const [feedbackInput, setFeedbackInput] = useState("");
+
+  switch (step) {
+    case "correct":
+      return (
+        <div className="flex items-center justify-between text-sm w-full">
+          <div>Was that answer helpful?</div>
+          <div className="flex gap-2 text-neutral-500">
+            <Button
+              size={"sm"}
+              variant={"outline"}
+              onClick={() => {
+                felicity.sendFeedback(answerFeedbackId, {
+                  isCorrect: true,
+                });
+                setStep("feedback");
+              }}
+            >
+              <ThumbsUpIcon size={16} />
+            </Button>
+            <Button
+              size={"sm"}
+              variant={"outline"}
+              onClick={() => {
+                felicity.sendFeedback(answerFeedbackId, {
+                  isCorrect: false,
+                });
+                setStep("feedback");
+              }}
+            >
+              <ThumbsDownIcon size={16} />
+            </Button>
+          </div>
+        </div>
+      );
+
+    case "feedback":
+      return (
+        <div className="flex flex-col text-sm w-full gap-3">
+          <div>Thanks for your feedback! Any additional comments?</div>
+          <Textarea
+            value={feedbackInput}
+            onChange={(e) => setFeedbackInput(e.target.value)}
+            placeholder="Additional thoughts?"
+          />
+          <div className="flex gap-2">
+            <Button
+              onClick={() => {
+                felicity.sendFeedback(answerFeedbackId, {
+                  comment: feedbackInput,
+                });
+                setStep("done");
+              }}
+            >
+              Submit
+            </Button>
+            <Button onClick={() => setStep("done")} variant={"secondary"}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      );
+
+    case "done":
+      return (
+        <div className="flex flex-col text-sm w-full gap-3">
+          <div>Thanks for your feedback!</div>
+        </div>
+      );
+  }
 };
 
 const FelicityResultBody: React.FC<{
@@ -145,15 +227,22 @@ const FelicityResultBody: React.FC<{
       );
 
     case "show-results":
-      const { steps } = state;
+      const { steps, answerFeedbackId } = state;
       return (
         <div className="w-full max-w-[750px] flex flex-col gap-6">
           {steps.map((step, index) => (
-            <>
+            <React.Fragment key={step.id}>
               <TutorialStepCard index={index + 1} step={step} />
               <Separator />
-            </>
+            </React.Fragment>
           ))}
+
+          {answerFeedbackId && (
+            <FeedbackRow
+              key={answerFeedbackId}
+              answerFeedbackId={answerFeedbackId}
+            />
+          )}
         </div>
       );
 
@@ -199,6 +288,7 @@ const FelicityChat: React.FC = () => {
               ? {
                   type: "show-results",
                   steps: response.steps,
+                  answerFeedbackId: response.answerFeedbackId,
                 }
               : { type: "empty-results" }
           );
