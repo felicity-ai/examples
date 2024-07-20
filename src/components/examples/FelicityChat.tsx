@@ -26,6 +26,7 @@ type ResultState =
   | {
       // Issued query, but no steps returned.
       type: "empty-results";
+      triageType: "data" | "internals" | "unparseable";
     }
   | {
       // There weas an error.
@@ -249,7 +250,8 @@ const FelicityResultBody: React.FC<{
     case "empty-results":
       return (
         <NullState
-          title="Unfortunately, we could not create a tutorial for that request."
+          key={state.triageType}
+          title={`This is a ${state.triageType} query.`}
           subtitle="Please contact your representative."
         />
       );
@@ -281,17 +283,25 @@ const FelicityChat: React.FC = () => {
       setLoading(true);
 
       try {
-        const response = await felicity.search(query ? query : input);
+        const response = await felicity.search(query ? query : input, {
+          userId: "example-id",
+          additionalData: {
+            fooData: "abc",
+          },
+        });
         if (response.success) {
-          setResultState(
-            response.steps.length > 0
-              ? {
-                  type: "show-results",
-                  steps: response.steps,
-                  answerFeedbackId: response.answerFeedbackId,
-                }
-              : { type: "empty-results" }
-          );
+          if (response.triageType === "usage") {
+            setResultState({
+              type: "show-results",
+              steps: response.steps,
+              answerFeedbackId: response.answerFeedbackId,
+            });
+          } else {
+            setResultState({
+              type: "empty-results",
+              triageType: response.triageType,
+            });
+          }
         } else {
           setResultState({
             type: "error",
