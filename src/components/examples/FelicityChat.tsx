@@ -5,7 +5,12 @@ import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
-import { FelicityProvider, TutorialStep, useFelicity } from "felicity-react";
+import {
+  FelicityProvider,
+  TutorialStep,
+  useFelicity,
+  useFelicitySearchQuery,
+} from "felicity-react";
 import {
   ArrowUp,
   BotIcon,
@@ -13,7 +18,7 @@ import {
   ThumbsDownIcon,
   ThumbsUpIcon,
 } from "lucide-react";
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 
 /**
  * The various states that your results section can be in.
@@ -35,6 +40,10 @@ type ResultState =
       reason: string;
     }
   | {
+      type: "loading";
+      text: string;
+    }
+  | {
       type: "show-results";
       steps: TutorialStep[];
       answerFeedbackId?: string;
@@ -43,7 +52,7 @@ type ResultState =
 const LoadingSpinner: React.FC = () => {
   return (
     <svg
-      className="animate-spin h-5 w-5 text-white"
+      className="animate-spin h-5 w-5 text-black"
       xmlns="http://www.w3.org/2000/svg"
       fill="none"
       viewBox="0 0 24 24"
@@ -210,6 +219,17 @@ const FeedbackRow: React.FC<{
   }
 };
 
+const ChatLoading: React.FC<{
+  text: string;
+}> = ({ text }) => {
+  return (
+    <div className="flex h-full flex-col gap-3 items-center justify-center">
+      <LoadingSpinner />
+      <div className="text-sm">{text}...</div>
+    </div>
+  );
+};
+
 const FelicityResultBody: React.FC<{
   state: ResultState;
   onQuery: (input: string) => void;
@@ -264,16 +284,15 @@ const FelicityResultBody: React.FC<{
           subtitle="Please contact your representative."
         />
       );
+
+    case "loading":
+      return <ChatLoading text={state.text} />;
   }
 };
 
 const FelicityChat: React.FC = () => {
-  const felicity = useFelicity();
+  const { search, status, error, loadingStep, data } = useFelicitySearchQuery();
   const [input, setInput] = useState("");
-  const [isLoading, setLoading] = useState(false);
-  const [resultState, setResultState] = useState<ResultState>({
-    type: "initial",
-  });
 
   const onSearch = useCallback(
     async (query?: string) => {
@@ -281,54 +300,66 @@ const FelicityChat: React.FC = () => {
         setInput(query);
       }
 
-      setLoading(true);
-
-      try {
-        const response = await felicity.search(query ? query : input, {
-          userId: "example-id",
-          additionalData: {
-            fooData: "abc",
-          },
-        });
-        if (response.success) {
-          if (response.triageType === "usage") {
-            if (response.goalSatisfied) {
-              setResultState({
-                type: "show-results",
-                steps: response.steps,
-                answerFeedbackId: response.answerFeedbackId,
-              });
-            } else {
-              setResultState({
-                type: "empty-results",
-                text: "This task is impossible in our app.",
-                triageType: "usage",
-              });
-            }
-          } else {
-            setResultState({
-              type: "empty-results",
-              text: `This was a ${response.triageType} query.`,
-              triageType: response.triageType,
-            });
-          }
-        } else {
-          setResultState({
-            type: "error",
-            reason: response.reason,
-          });
-        }
-      } catch (e) {
-        setResultState({
-          type: "error",
-          reason: "Something appeared to go wrong.",
-        });
-      }
-
-      setLoading(false);
+      search(query ? query : input, {
+        userId: "example-id",
+        additionalData: {
+          fooData: "abc",
+        },
+      });
     },
-    [felicity, input]
+    [input, search]
   );
+
+  const resultState: ResultState = useMemo(() => {
+    if (status === "idle") {
+      return {
+        type: "initial",
+      };
+    }
+
+    if (status === "pending" && loadingStep) {
+      return {
+        type: "loading",
+        text: loadingStep,
+      };
+    }
+
+    if (status === "success" && data) {
+      if (data.triageType === "usage") {
+        if (data.goalSatisfied) {
+          return {
+            type: "show-results",
+            steps: data.steps,
+            answerFeedbackId: data.answerFeedbackId,
+          };
+        } else {
+          return {
+            type: "empty-results",
+            text: "This task is impossible in our app.",
+            triageType: "usage",
+          };
+        }
+      } else {
+        return {
+          type: "empty-results",
+          text: `This was a ${data.triageType} query.`,
+          triageType: data.triageType,
+        };
+      }
+    }
+
+    if (status === "error" && error) {
+      return {
+        type: "error",
+        reason: error,
+      };
+    }
+
+    return {
+      type: "error",
+      reason: "Something went wrong",
+    };
+  }, [error, loadingStep, data, status]);
 
   return (
     <div className="container max-w-none min-h-screen flex h-screen w-full flex-col items-center gap-6 pt-12 px-6">
@@ -342,12 +373,14 @@ const FelicityChat: React.FC = () => {
 
       {/* Results Section */}
       <div className="flex-1 flex justify-center overflow-y-auto min-h-0 w-full">
-        <FelicityResultBody
-          state={resultState}
-          onQuery={(input) => {
-            onSearch(input);
-          }}
-        />
+        {resultState && (
+          <FelicityResultBody
+            state={resultState}
+            onQuery={(input) => {
+              onSearch(input);
+            }}
+          />
+        )}
       </div>
 
       {/* Search */}
@@ -367,16 +400,16 @@ const FelicityChat: React.FC = () => {
             placeholder="Search ACME company for questions."
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            disabled={isLoading}
+            disabled={status === "pending"}
           />
 
           <Button
             size="icon"
             className="rounded-full flex-none"
-            disabled={isLoading}
+            disabled={status === "pending"}
             onClick={() => onSearch()}
           >
-            {isLoading ? <LoadingSpinner /> : <ArrowUp className="h-4 w-4" />}
+            <ArrowUp className="h-4 w-4" />
           </Button>
         </div>
       </div>
